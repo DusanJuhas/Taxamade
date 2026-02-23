@@ -9,10 +9,15 @@ print(f"pandas -",pd.__version__)
 pd.set_option("display.max_rows",20)
 pd.set_option("display.width",None)
 pd.set_option("display.max_columns",30)
+np.set_printoptions(threshold=np.inf, linewidth=np.inf) #switch off linewidth
 print("----TAXAMADE----")
 
 found = False
+kurz_USD=21.84
+kurz_EUR=24.66
+print("Jednotný kurz: USD , EUR",kurz_USD,kurz_EUR)
 
+####    parsing CSV do PD tab  ####
 def parse_column(col):
     error = 0
     data=oo.dropna(subset=["Směr"],axis=0,how="any")    # only valid column
@@ -22,7 +27,7 @@ def parse_column(col):
 
     data["Datum obchodu"] = pd.to_datetime(
         data["Datum obchodu"],
-        # format="%d.%m.%Y %H:%M",  # přesný formát "24.11.2025 17:24"
+        format="%d.%m.%Y %H:%M",  # přesný formát "24.11.2025 17:24"
         errors="coerce"           # neparsovatelné hodnoty -> NaT (něco jako NaN pro datum)
     )
     #conversion to number
@@ -46,6 +51,15 @@ def parse_column(col):
     print("PARSE ERRORS = ",error)
     return data
 
+####  Sumarizace pozic ####
+def column_sum(pd):
+    pd.loc[pd["Měna"] == "USD", "Objem v CZK"] = pd["Objem v USD"].abs() * kurz_USD
+    pd.loc[pd["Měna"] == "USD", "Poplatky v CZK"] = pd["Poplatky v USD"].abs() * kurz_USD
+    pd.loc[pd["Měna"] == "EUR", "Objem v CZK"] = pd["Objem v EUR"].abs() * kurz_USD
+    pd.loc[pd["Měna"] == "EUR", "Poplatky v CZK"] = pd["Poplatky v EUR"].abs() * kurz_USD
+    return pd
+###########################
+
 with open("Obchody.csv", "r") as fin, open("fio.csv", "w") as fout:
     for line in fin:
         if not found and line.lstrip().startswith("Datum obchodu"):
@@ -61,18 +75,40 @@ oo = pd.read_csv('fio.csv',sep=';',encoding='ANSI') # with semicolon
 sell=parse_column("Prodej")
 sell.info()
 buy=parse_column("Nákup")
-buy.info()
+#buy.info()
 
-cols_to_sum = ["Objem v CZK", "Poplatky v CZK","Objem v USD","Poplatky v USD","Objem v EUR","Poplatky v EUR"] 
-# groupby nad 2. sloupcem a součet 3. sloupce
-out = sell.groupby("Symbol", as_index=False)[cols_to_sum].sum()
-print(out)           # tabulka (col2, col3_sum)
-out = buy.groupby("Symbol", as_index=False)[cols_to_sum].sum()
-print(out)           # tabulka (col2, col3_sum)
+cols_to_sum = ["Počet","Objem v CZK", "Poplatky v CZK","Objem v USD","Poplatky v USD","Objem v EUR","Poplatky v EUR"] 
+# groupby nad 2. sloupcem a součet sloupce v def poli
+out = sell.groupby(["Symbol","Měna"], as_index=False)[cols_to_sum].sum()
+sell=column_sum(out)
+#print(sell)           # tabulka 
+print("__________________________")
+out = buy.groupby(["Symbol","Měna"], as_index=False)[cols_to_sum].sum()
+buy=column_sum(out)
+#print(buy)           # tabulka 
 
-# Nebo vypsat po řádcích:
-#for _, r in out.iterrows():
-#    print(r["Symbol"], r[cols_to_sum])
+
+with pd.ExcelWriter("fio.xlsx") as writer:
+    # První tabulka
+    sell.to_excel(writer, sheet_name="Report", index=False, startrow=1)
+
+    fmt_default   = writer.book.add_format({"num_format": '#,##0.00'})
+    # Nadpis mezi tabulkami
+    worksheet = writer.sheets["Report"]
+    worksheet.write(0, 0, "Výpis prodej")
+    
+    # Najdi indexy sloupců a nastav formáty na celý sloupec
+    cols = {name: idx for idx, name in enumerate(sell.columns)}
+    for name in cols_to_sum:
+        if name in cols:
+            col = cols[name]
+            worksheet.set_column(col, col, 12, fmt_default)
+
+    # Druhá tabulka pod první (např.  df1 má 100 řádků)
+    start2 = len(sell) + 4
+    worksheet.write(start2, 0, "Výpis nákup")
+
+    buy.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
 
 
 
@@ -90,8 +126,8 @@ np.add.at(sums, inv, pole[:, 3])
 
 print("__________________________")
 # Výsledek: dvojice (unikátní_hodnota, součet)
-for u, s in zip(uniq, sums):
-    print(u, s)
+#for u, s in zip(uniq, sums):
+   # print(u, s)
 
 
 
